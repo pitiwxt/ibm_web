@@ -1,0 +1,62 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #050510;
+  font-family: 'Inter', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(92, 124, 250, 0.35); border-radius: 2px; }
+
+/* Remove canvas default outline */
+canvas { outline: none; display: block; }
+
+/* Prevent default touch behaviors on mobile */
+body { touch-action: none; overscroll-behavior: none; }
+
+/* Custom glass card utility */
+.glass {
+  background: rgba(15, 15, 36, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(92, 124, 250, 0.2);
+}
+
+/* Gradient text shortcut */
+.gradient-text {
+  background: linear-gradient(90deg, #5c7cfa, #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Neon glow effect */
+.neon-glow { box-shadow: 0 0 15px rgba(92, 124, 250, 0.5), 0 0 30px rgba(92, 124, 250, 0.25); }
+
+/* Smooth page transitions */
+.animate-slide-up {
+  animation: slideUp 0.4s ease-out both;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-10px); }
+}
+
+.animate-float { animation: float 3s ease-in-out infinite; }
