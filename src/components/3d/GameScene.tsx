@@ -1,7 +1,7 @@
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
 import { Physics } from '@react-three/rapier';
-import { Suspense, useRef, useState, useCallback, useEffect } from 'react';
+import { Suspense } from 'react';
 import * as THREE from 'three';
 
 import SceneLighting from './SceneLighting.js';
@@ -22,7 +22,6 @@ interface GameSceneProps {
 
 function SceneInner({ onDiskClick, rollTrigger, selectableSlotIndex, rolling, d1Value, d2Value }: GameSceneProps) {
     const { disks, moveSlots, phase, settings } = useGameStore();
-    const cameraRef = useRef<THREE.PerspectiveCamera>(null);
 
     // Group disks by location
     const disksByLocation = disks.reduce((acc, d) => {
@@ -31,15 +30,10 @@ function SceneInner({ onDiskClick, rollTrigger, selectableSlotIndex, rolling, d1
     }, {} as Record<number, typeof disks>);
 
     const blots = phase === 'gameover' ? blotLocations(disks) : [];
+    // Board track scrolls – camera stays fixed
     const avgLocation = disks.reduce((s, d) => s + d.location, 0) / disks.length;
-    const cameraTargetX = avgLocation * SLOT_SPACING;
+    const boardScrollX = avgLocation * SLOT_SPACING;
 
-    // Smooth camera follow
-    useEffect(() => {
-        // Camera position handled by OrbitControls target
-    }, [cameraTargetX]);
-
-    // Which slot indices are available to use
     const availableSlots = moveSlots
         .map((s, i) => (!s.used ? i : null))
         .filter((i) => i !== null) as number[];
@@ -54,7 +48,7 @@ function SceneInner({ onDiskClick, rollTrigger, selectableSlotIndex, rolling, d1
 
             <Suspense fallback={null}>
                 <Physics gravity={[0, -12, 0]}>
-                    <BoardTrack cameraX={cameraTargetX} />
+                    <BoardTrack cameraX={boardScrollX} />
 
                     {/* Render disks */}
                     {Object.entries(disksByLocation).map(([loc, disksHere]) =>
@@ -82,8 +76,9 @@ function SceneInner({ onDiskClick, rollTrigger, selectableSlotIndex, rolling, d1
                 </Physics>
             </Suspense>
 
+            {/* Camera stays fixed – only the board scrolls */}
             <OrbitControls
-                target={[cameraTargetX, 0, 0]}
+                target={[0, 0, 0]}
                 minDistance={5}
                 maxDistance={20}
                 maxPolarAngle={Math.PI / 2.2}
