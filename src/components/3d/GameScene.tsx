@@ -1,5 +1,5 @@
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Stars, Fog } from '@react-three/drei';
+import { OrbitControls, Stars } from '@react-three/drei';
 import { Physics } from '@react-three/rapier';
 import { Suspense, useRef, useState, useCallback, useEffect } from 'react';
 import * as THREE from 'three';
@@ -12,13 +12,15 @@ import { useGameStore } from '../../game/gameStore.js';
 import { blotLocations } from '../../game/gameRules.js';
 
 interface GameSceneProps {
-    onRollResult?: (d1: number, d2: number) => void;
     onDiskClick?: (diskId: string) => void;
     rollTrigger: number;
     selectableSlotIndex: number | null;
+    rolling: boolean;
+    d1Value?: number;
+    d2Value?: number;
 }
 
-function SceneInner({ onRollResult, onDiskClick, rollTrigger, selectableSlotIndex }: GameSceneProps) {
+function SceneInner({ onDiskClick, rollTrigger, selectableSlotIndex, rolling, d1Value, d2Value }: GameSceneProps) {
     const { disks, moveSlots, phase, settings } = useGameStore();
     const cameraRef = useRef<THREE.PerspectiveCamera>(null);
 
@@ -69,11 +71,13 @@ function SceneInner({ onRollResult, onDiskClick, rollTrigger, selectableSlotInde
                         ))
                     )}
 
-                    {/* Dice physics — shown during rolling */}
+                    {/* Dice – visual only */}
                     <DicePhysics
                         rollTrigger={rollTrigger}
-                        onRollResult={onRollResult}
                         mode={settings.diceMode}
+                        rolling={rolling}
+                        d1Value={d1Value}
+                        d2Value={d2Value}
                     />
                 </Physics>
             </Suspense>
