@@ -167,7 +167,7 @@ export default function HUD({ onRoll, onUndo, onOpenSettings, onHowToPlay, selec
                                             : 'bg-primary-900/60 text-primary-300 border border-primary-600/50 hover:bg-primary-700/60 hover:scale-105'
                                     }`}
                             >
-                                {slot.used ? '✓' : `+${slot.value} step`}
+                                {slot.used ? '✓' : `+${slot.value} ${slot.value === 1 ? 'step' : 'steps'}`}
                             </button>
                         ))}
                     </div>

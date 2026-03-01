@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from 'react';
+import { useRef, useState, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import type { ThreeEvent } from '@react-three/fiber';
 import * as THREE from 'three';
@@ -37,36 +37,35 @@ export default function DiskPiece({
     const colorIndex = parseInt(disk.id.split('-')[1]) % COLORS.length;
     const baseColor = COLORS[colorIndex];
 
-    // Target X position based on slot
+    // Target resting position in world space
     const targetX = disk.location * SLOT_SPACING;
-    // Stack disks vertically at same location
     const targetY = DISK_HEIGHT / 2 + indexAtLocation * STACK_GAP;
-    // Slight Z spread at same location
     const targetZ = (indexAtLocation - (totalAtLocation - 1) / 2) * 0.01;
 
+    // Trigger arc animation when disk.location changes (useEffect = correct place for side-effects)
     useEffect(() => {
         if (!meshRef.current) return;
         if (prevLocation.current === disk.location) return;
 
         const fromX = prevLocation.current * SLOT_SPACING;
         const toX = targetX;
-        const midY = 1.8 + Math.abs(toX - fromX) * 0.15;
         prevLocation.current = disk.location;
         isAnimating.current = true;
 
-        // Arc trajectory via GSAP
-        const proxy = { x: fromX, y: meshRef.current.position.y, rotation: 0 };
+        const midY = 1.8 + Math.abs(toX - fromX) * 0.15;
+        const proxy = { t: 0, rotation: 0 };
+
+        gsap.killTweensOf(proxy);
         gsap.to(proxy, {
             duration: 0.55,
             ease: 'power2.inOut',
-            x: toX,
-            y: midY,
+            t: 1,
             rotation: Math.PI * 2,
             onUpdate: () => {
                 if (!meshRef.current) return;
-                const t = proxy.x === toX ? 1 : (proxy.x - fromX) / (toX - fromX);
-                const arcY = 4 * (midY - targetY) * t * (1 - t) + targetY;
-                meshRef.current.position.x = proxy.x;
+                const x = THREE.MathUtils.lerp(fromX, toX, proxy.t);
+                const arcY = 4 * (midY - targetY) * proxy.t * (1 - proxy.t) + targetY;
+                meshRef.current.position.x = x;
                 meshRef.current.position.y = Math.max(arcY, targetY);
                 meshRef.current.rotation.z = proxy.rotation;
             },
@@ -80,20 +79,24 @@ export default function DiskPiece({
         });
     }, [disk.location, targetX, targetY, targetZ]);
 
-    // Snap to position if not animating
+    // Single useFrame: lerp to resting position when idle, and keep glow glued to the disk
     useFrame(() => {
-        if (!meshRef.current || isAnimating.current) return;
-        meshRef.current.position.x = THREE.MathUtils.lerp(meshRef.current.position.x, targetX, 0.15);
-        meshRef.current.position.y = THREE.MathUtils.lerp(meshRef.current.position.y, targetY, 0.15);
-        meshRef.current.position.z = THREE.MathUtils.lerp(meshRef.current.position.z, targetZ, 0.15);
-    });
+        const mesh = meshRef.current;
+        const glow = glowRef.current;
 
-    // Glow pulse for selectable disks
-    useFrame(() => {
-        if (!glowRef.current) return;
-        const scale = isSelectable ? 1 + Math.sin(Date.now() * 0.004) * 0.12 : 1;
-        glowRef.current.scale.setScalar(scale);
-        glowRef.current.visible = isSelectable || isBlot;
+        if (mesh && !isAnimating.current) {
+            mesh.position.x = THREE.MathUtils.lerp(mesh.position.x, targetX, 0.15);
+            mesh.position.y = THREE.MathUtils.lerp(mesh.position.y, targetY, 0.15);
+            mesh.position.z = THREE.MathUtils.lerp(mesh.position.z, targetZ, 0.15);
+        }
+
+        // Glow tracks the disk every frame — including mid-arc
+        if (glow) {
+            if (mesh) glow.position.copy(mesh.position);
+            const scale = isSelectable ? 1 + Math.sin(Date.now() * 0.004) * 0.12 : 1;
+            glow.scale.setScalar(scale);
+            glow.visible = isSelectable || isBlot;
+        }
     });
 
     function handleClick(e: ThreeEvent<MouseEvent>) {
@@ -105,7 +108,7 @@ export default function DiskPiece({
         <group>
             <mesh
                 ref={meshRef}
-                position={[prevLocation.current * SLOT_SPACING, targetY, targetZ]}
+                position={[targetX, targetY, targetZ]}
                 castShadow
                 receiveShadow
                 onClick={handleClick}
@@ -123,14 +126,31 @@ export default function DiskPiece({
                 {/* Top face highlight ring */}
                 <mesh position={[0, DISK_HEIGHT / 2 + 0.001, 0]} rotation={[-Math.PI / 2, 0, 0]}>
                     <ringGeometry args={[DISK_RADIUS * 0.4, DISK_RADIUS * 0.85, 32]} />
-                    <meshBasicMaterial color={isBlot ? '#fca5a5' : '#ffffff'} transparent opacity={0.25} />
+                    <meshBasicMaterial
+                        color={isBlot ? '#fca5a5' : '#ffffff'}
+                        transparent
+                        opacity={0.25}
+                    />
+                </mesh>
+                {/* Rim edge torus */}
+                <mesh position={[0, 0, 0]}>
+                    <torusGeometry args={[DISK_RADIUS, 0.03, 8, 32]} />
+                    <meshStandardMaterial
+                        color={isBlot ? '#fca5a5' : baseColor}
+                        emissive={isBlot ? '#fca5a5' : baseColor}
+                        emissiveIntensity={0.4}
+                    />
                 </mesh>
             </mesh>
 
-            {/* Glow indicator */}
-            <mesh ref={glowRef} position={[prevLocation.current * SLOT_SPACING, targetY, targetZ]}>
-                <cylinderGeometry args={[DISK_RADIUS + 0.15, DISK_RADIUS + 0.15, 0.04, 32]} />
-                <meshBasicMaterial color={isBlot ? '#ef4444' : '#5c7cfa'} transparent opacity={0.35} />
+            {/* Glow ring — position synced every frame in useFrame above */}
+            <mesh ref={glowRef} position={[targetX, targetY, targetZ]} visible={false}>
+                <cylinderGeometry args={[DISK_RADIUS + 0.18, DISK_RADIUS + 0.18, 0.04, 32]} />
+                <meshBasicMaterial
+                    color={isBlot ? '#ef4444' : '#5c7cfa'}
+                    transparent
+                    opacity={0.4}
+                />
             </mesh>
         </group>
     );

@@ -1,8 +1,7 @@
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Stars, Fog } from '@react-three/drei';
+import { OrbitControls, Stars } from '@react-three/drei';
 import { Physics } from '@react-three/rapier';
-import { Suspense, useRef, useState, useCallback, useEffect } from 'react';
-import * as THREE from 'three';
+import { Suspense } from 'react';
 
 import SceneLighting from './SceneLighting.js';
 import BoardTrack, { SLOT_SPACING } from './BoardTrack.js';
@@ -18,30 +17,34 @@ interface GameSceneProps {
     selectableSlotIndex: number | null;
 }
 
-function SceneInner({ onRollResult, onDiskClick, rollTrigger, selectableSlotIndex }: GameSceneProps) {
+function SceneInner({ onRollResult, onDiskClick, rollTrigger }: GameSceneProps) {
     const { disks, moveSlots, phase, settings } = useGameStore();
-    const cameraRef = useRef<THREE.PerspectiveCamera>(null);
 
-    // Group disks by location
-    const disksByLocation = disks.reduce((acc, d) => {
-        (acc[d.location] = acc[d.location] ?? []).push(d);
-        return acc;
-    }, {} as Record<number, typeof disks>);
+    // Group disks by location for stacking
+    const disksByLocation = disks.reduce(
+        (acc, d) => {
+            (acc[d.location] = acc[d.location] ?? []).push(d);
+            return acc;
+        },
+        {} as Record<number, typeof disks>,
+    );
 
     const blots = phase === 'gameover' ? blotLocations(disks) : [];
+
+    // Camera target: average disk position (OrbitControls pans the camera, not the board)
     const avgLocation = disks.reduce((s, d) => s + d.location, 0) / disks.length;
     const cameraTargetX = avgLocation * SLOT_SPACING;
 
-    // Smooth camera follow
-    useEffect(() => {
-        // Camera position handled by OrbitControls target
-    }, [cameraTargetX]);
+    // Slot range for the board — determines which rings to render
+    const locations = disks.map((d) => d.location);
+    const minSlot = Math.min(...locations);
+    const maxSlot = Math.max(...locations);
 
-    // Which slot indices are available to use
+    const occupiedSlots = new Set(Object.keys(disksByLocation).map(Number));
+
     const availableSlots = moveSlots
         .map((s, i) => (!s.used ? i : null))
         .filter((i) => i !== null) as number[];
-
     const isSelectable = phase === 'selecting' && availableSlots.length > 0;
 
     return (
@@ -52,10 +55,14 @@ function SceneInner({ onRollResult, onDiskClick, rollTrigger, selectableSlotInde
 
             <Suspense fallback={null}>
                 <Physics gravity={[0, -12, 0]}>
-                    <BoardTrack cameraX={cameraTargetX} />
+                    {/* Board sits at fixed world positions — no group movement */}
+                    <BoardTrack
+                        occupiedSlots={occupiedSlots}
+                        minSlot={minSlot}
+                        maxSlot={maxSlot}
+                    />
 
-                    {/* Render disks */}
-                    {Object.entries(disksByLocation).map(([loc, disksHere]) =>
+                    {Object.entries(disksByLocation).map(([, disksHere]) =>
                         disksHere.map((disk, idx) => (
                             <DiskPiece
                                 key={disk.id}
@@ -66,10 +73,9 @@ function SceneInner({ onRollResult, onDiskClick, rollTrigger, selectableSlotInde
                                 totalAtLocation={disksHere.length}
                                 indexAtLocation={idx}
                             />
-                        ))
+                        )),
                     )}
 
-                    {/* Dice physics — shown during rolling */}
                     <DicePhysics
                         rollTrigger={rollTrigger}
                         onRollResult={onRollResult}
@@ -78,6 +84,7 @@ function SceneInner({ onRollResult, onDiskClick, rollTrigger, selectableSlotInde
                 </Physics>
             </Suspense>
 
+            {/* Camera pans to follow the average disk position */}
             <OrbitControls
                 target={[cameraTargetX, 0, 0]}
                 minDistance={5}
@@ -92,7 +99,6 @@ function SceneInner({ onRollResult, onDiskClick, rollTrigger, selectableSlotInde
 
 export default function GameScene(props: GameSceneProps) {
     const { settings } = useGameStore();
-    const shadowMapSize = settings.quality === 'high' ? 2048 : settings.quality === 'medium' ? 1024 : 512;
 
     return (
         <Canvas
