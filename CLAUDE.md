@@ -102,8 +102,8 @@ The app splits into two separately deployed services:
 1. Push this repo to GitHub.
 2. On [render.com](https://render.com), create a **New Web Service** → connect the repo.
 3. Render auto-detects `render.yaml`; confirm these settings:
-   - **Build command:** `npm install && npm run build:server`
-   - **Start command:** `npm run start`
+   - **Build command:** `yarn install --production=false && yarn build:server`
+   - **Start command:** `yarn start`
    - **Environment:** Node
 4. No manual env vars needed — Render injects `PORT` automatically.
 5. After deploy, copy the service URL (e.g. `https://backgammon-survival-server.onrender.com`).
