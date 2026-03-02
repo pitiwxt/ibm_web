@@ -1,261 +1,156 @@
 /**
- * DicePhysics.tsx – Reliable 3D dice with physics + timeout fallback
- *
- * Key fixes:
- * - Removed CuboidCollider (was creating double-collider chaos with mesh children)
- * - Added 5s timeout fallback so game never gets stuck
- * - Lower settle thresholds, faster detection
- * - Wrapped SFX in try-catch so audio failures don't crash physics
+ * DicePhysics.tsx – Visual-only 3D dice with dot faces
+ * No Rapier physics – just spinning cubes with proper die face dots.
+ * Roll values come from rollDice() in ClientPage.
  */
-import * as THREE from 'three';
-import { useRef, useEffect, useState } from 'react';
-import { RigidBody } from '@react-three/rapier';
-import type { RapierRigidBody } from '@react-three/rapier';
+import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
+import * as THREE from 'three';
 
-const FACE_NORMALS = [
-    { normal: new THREE.Vector3(0, 1, 0), value: 1 },
-    { normal: new THREE.Vector3(0, -1, 0), value: 6 },
-    { normal: new THREE.Vector3(1, 0, 0), value: 2 },
-    { normal: new THREE.Vector3(-1, 0, 0), value: 5 },
-    { normal: new THREE.Vector3(0, 0, 1), value: 3 },
-    { normal: new THREE.Vector3(0, 0, -1), value: 4 },
-];
+// Dot positions for each face (x, y on face from -0.28 to 0.28)
+const FACE_DOTS: Record<number, [number, number][]> = {
+    1: [[0, 0]],
+    2: [[-0.22, -0.22], [0.22, 0.22]],
+    3: [[-0.22, -0.22], [0, 0], [0.22, 0.22]],
+    4: [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0.22], [0.22, 0.22]],
+    5: [[-0.22, -0.22], [0.22, -0.22], [0, 0], [-0.22, 0.22], [0.22, 0.22]],
+    6: [[-0.22, -0.22], [0.22, -0.22], [-0.22, 0], [0.22, 0], [-0.22, 0.22], [0.22, 0.22]],
+};
 
-function getTopFace(quat: THREE.Quaternion): number {
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
-    let best = -Infinity, result = 1;
-    for (const { normal, value } of FACE_NORMALS) {
-        const d = up.dot(normal);
-        if (d > best) { best = d; result = value; }
-    }
-    return result;
+// Builds a group with all 6 faces of dots embedded on the cube surface
+function DieDots({ dotColor }: { dotColor: string }) {
+    // 6 faces: +Y, -Y, +X, -X, +Z, -Z → values 1,6,2,5,3,4
+    const faces: Array<{ val: number; pos: [number, number, number]; up: [number, number, number] }> = [
+        { val: 1, pos: [0, 0.46, 0], up: [0, 1, 0] },   // top
+        { val: 6, pos: [0, -0.46, 0], up: [0, -1, 0] },  // bottom
+        { val: 2, pos: [0.46, 0, 0], up: [1, 0, 0] },    // right
+        { val: 5, pos: [-0.46, 0, 0], up: [-1, 0, 0] },  // left
+        { val: 3, pos: [0, 0, 0.46], up: [0, 0, 1] },    // front
+        { val: 4, pos: [0, 0, -0.46], up: [0, 0, -1] },  // back
+    ];
+
+    return (
+        <>
+            {faces.map(({ val, pos, up }) => {
+                const dots = FACE_DOTS[val] ?? [];
+                return dots.map(([dx, dy], di) => {
+                    // Compute world position of dot on face
+                    const normal = new THREE.Vector3(...up);
+                    // Create two tangent vectors
+                    const t1 = new THREE.Vector3(normal.y === 0 ? 0 : 1, normal.x === 0 && normal.z === 0 ? 0 : 1, 0)
+                        .cross(normal).normalize();
+                    if (t1.lengthSq() < 0.01) t1.set(1, 0, 0);
+                    const t2 = normal.clone().cross(t1).normalize();
+
+                    const dotPos = new THREE.Vector3(...pos)
+                        .addScaledVector(t1, dx)
+                        .addScaledVector(t2, dy);
+
+                    return (
+                        <mesh key={`f${val}-d${di}`} position={dotPos.toArray() as [number, number, number]}>
+                            <sphereGeometry args={[0.055, 8, 8]} />
+                            <meshStandardMaterial color={dotColor} roughness={0.8} />
+                        </mesh>
+                    );
+                });
+            })}
+        </>
+    );
 }
 
-// Simple die dots for top face visual (rendered in HUD, not 3D geometry)
-interface SingleDieProps {
-    startPos: [number, number, number];
+interface VisualDieProps {
+    position: [number, number, number];
     color: string;
-    rollTrigger: number;
-    mode: '1-2' | '1-6';
-    onSettled: (value: number) => void;
+    rolling: boolean;
 }
 
-function SingleDie({ startPos, color, rollTrigger, mode, onSettled }: SingleDieProps) {
-    const rbRef = useRef<RapierRigidBody>(null);
-    const [glowing, setGlowing] = useState(false);
-    const settledTimer = useRef(0);
-    const hasSettled = useRef(false);
-    const lastFire = useRef(-1);
-    const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+function VisualDie({ position, color, rolling }: VisualDieProps) {
+    const groupRef = useRef<THREE.Group>(null);
+    const vx = useRef(7 + Math.random() * 5);
+    const vy = useRef(11 + Math.random() * 6);
+    const vz = useRef(5 + Math.random() * 4);
 
-    useEffect(() => {
-        if (rollTrigger === 0 || rollTrigger === lastFire.current) return;
-        lastFire.current = rollTrigger;
-        hasSettled.current = false;
-        settledTimer.current = 0;
-        setGlowing(true);
-
-        // Clear any pending timeout
-        if (timeoutRef.current) clearTimeout(timeoutRef.current);
-
-        const rb = rbRef.current;
-        if (rb) {
-            // Reset to starting position with random rotation
-            const q = new THREE.Quaternion().setFromEuler(
-                new THREE.Euler(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI)
-            );
-            rb.setTranslation(
-                { x: startPos[0] + (Math.random() - 0.5) * 0.4, y: startPos[1], z: startPos[2] + (Math.random() - 0.5) * 0.3 },
-                true
-            );
-            rb.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true);
-            rb.setLinvel({ x: 0, y: 0, z: 0 }, true);
-            rb.setAngvel({ x: 0, y: 0, z: 0 }, true);
-
-            // Apply impulse to throw the die
-            rb.applyImpulse(
-                {
-                    x: (Math.random() - 0.5) * 3,
-                    y: -(5 + Math.random() * 3),
-                    z: (Math.random() - 0.5) * 2,
-                },
-                true
-            );
-            rb.applyTorqueImpulse(
-                {
-                    x: (Math.random() - 0.5) * 10,
-                    y: (Math.random() - 0.5) * 10,
-                    z: (Math.random() - 0.5) * 10,
-                },
-                true
-            );
-        }
-
-        // === FALLBACK TIMEOUT ===
-        // If dice don't settle in 5 seconds, force a random result
-        timeoutRef.current = setTimeout(() => {
-            if (hasSettled.current) return;
-            hasSettled.current = true;
-            setGlowing(false);
-            let face = Math.ceil(Math.random() * 6);
-            if (mode === '1-2') face = Math.random() < 0.5 ? 1 : 2;
-            onSettled(face);
-        }, 5000);
-
-        return () => {
-            if (timeoutRef.current) clearTimeout(timeoutRef.current);
-        };
-    }, [rollTrigger]);
+    // Reset spin speed when roll starts
+    if (rolling && vx.current < 4) {
+        vx.current = 7 + Math.random() * 5;
+        vy.current = 11 + Math.random() * 6;
+        vz.current = 5 + Math.random() * 4;
+    }
 
     useFrame((_, delta) => {
-        if (!rbRef.current || hasSettled.current || rollTrigger === 0) return;
-
-        const linVel = rbRef.current.linvel();
-        const angVel = rbRef.current.angvel();
-        const speed = Math.hypot(linVel.x, linVel.y, linVel.z);
-        const angSpeed = Math.hypot(angVel.x, angVel.y, angVel.z);
-
-        if (speed < 0.15 && angSpeed < 0.15) {
-            settledTimer.current += delta;
-            if (settledTimer.current > 0.6) {
-                if (hasSettled.current) return;
-                hasSettled.current = true;
-                setGlowing(false);
-
-                if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
-
-                const rot = rbRef.current.rotation();
-                const quat = new THREE.Quaternion(rot.x, rot.y, rot.z, rot.w);
-                let face = getTopFace(quat);
-                if (mode === '1-2') face = face <= 3 ? 1 : 2;
-
-                // Try to play settle sound without crashing
-                try {
-                    import('../../hooks/useSound.js').then((m) => m.SFX.diceSettle());
-                } catch {/* ignore */ }
-
-                onSettled(face);
-            }
+        if (!groupRef.current) return;
+        if (rolling) {
+            groupRef.current.rotation.x += delta * vx.current;
+            groupRef.current.rotation.y += delta * vy.current;
+            groupRef.current.rotation.z += delta * vz.current;
         } else {
-            settledTimer.current = 0;
+            // Slow down smoothly
+            vx.current *= 0.85;
+            vy.current *= 0.85;
+            vz.current *= 0.85;
+            groupRef.current.rotation.x += delta * vx.current;
+            groupRef.current.rotation.y += delta * vy.current;
+            groupRef.current.rotation.z += delta * vz.current;
         }
     });
 
+    const dotColor = '#0a0a18';
+
     return (
-        <RigidBody
-            ref={rbRef}
-            restitution={0.45}
-            friction={0.65}
-            linearDamping={0.4}
-            angularDamping={0.3}
-            position={startPos}
-            colliders="cuboid"
-        >
+        <group ref={groupRef} position={position}>
+            {/* Die body */}
             <mesh castShadow receiveShadow>
-                <boxGeometry args={[0.8, 0.8, 0.8]} />
+                <boxGeometry args={[0.9, 0.9, 0.9]} />
                 <meshStandardMaterial
                     color={color}
-                    roughness={0.3}
-                    metalness={0.3}
-                    emissive={glowing ? color : '#000000'}
-                    emissiveIntensity={glowing ? 0.5 : 0}
+                    roughness={0.25}
+                    metalness={0.35}
+                    emissive={rolling ? color : '#000000'}
+                    emissiveIntensity={rolling ? 0.5 : 0}
                 />
             </mesh>
-        </RigidBody>
-    );
-}
-
-// ── Simple walled tray (no CuboidCollider – just flat box RigidBodies) ─────────
-
-function DiceTray() {
-    return (
-        <group>
-            {/* Floor */}
-            <RigidBody type="fixed" position={[0, 0, 0]} colliders="cuboid">
-                <mesh receiveShadow>
-                    <boxGeometry args={[8, 0.3, 5]} />
-                    <meshStandardMaterial color="#0d0d24" roughness={0.9} transparent opacity={0.9} />
-                </mesh>
-            </RigidBody>
-            {/* Left wall */}
-            <RigidBody type="fixed" position={[-4, 1, 0]} colliders="cuboid">
-                <mesh>
-                    <boxGeometry args={[0.3, 2, 5]} />
-                    <meshStandardMaterial color="#1a1a38" transparent opacity={0.5} />
-                </mesh>
-            </RigidBody>
-            {/* Right wall */}
-            <RigidBody type="fixed" position={[4, 1, 0]} colliders="cuboid">
-                <mesh>
-                    <boxGeometry args={[0.3, 2, 5]} />
-                    <meshStandardMaterial color="#1a1a38" transparent opacity={0.5} />
-                </mesh>
-            </RigidBody>
-            {/* Front wall */}
-            <RigidBody type="fixed" position={[0, 1, 2.5]} colliders="cuboid">
-                <mesh>
-                    <boxGeometry args={[8, 2, 0.3]} />
-                    <meshStandardMaterial color="#1a1a38" transparent opacity={0.5} />
-                </mesh>
-            </RigidBody>
-            {/* Back wall */}
-            <RigidBody type="fixed" position={[0, 1, -2.5]} colliders="cuboid">
-                <mesh>
-                    <boxGeometry args={[8, 2, 0.3]} />
-                    <meshStandardMaterial color="#1a1a38" transparent opacity={0.5} />
-                </mesh>
-            </RigidBody>
-            {/* Glowing border lines */}
-            <mesh position={[0, 0.16, 0]}>
-                <boxGeometry args={[7.8, 0.02, 4.6]} />
-                <meshStandardMaterial color="#5c7cfa" emissive="#5c7cfa" emissiveIntensity={1.5} transparent opacity={0.6} />
-            </mesh>
+            {/* Dot faces */}
+            <DieDots dotColor={dotColor} />
         </group>
     );
 }
-
-// ── Main component ─────────────────────────────────────────────────────────────
 
 interface DicePhysicsProps {
     rollTrigger: number;
     onRollResult?: (d1: number, d2: number) => void;
     mode: '1-2' | '1-6';
+    rolling: boolean;
+    d1Value?: number;
+    d2Value?: number;
 }
 
-export default function DicePhysics({ rollTrigger, onRollResult, mode }: DicePhysicsProps) {
-    const results = useRef<{ d1: number | null; d2: number | null }>({ d1: null, d2: null });
-
-    useEffect(() => {
-        results.current = { d1: null, d2: null };
-    }, [rollTrigger]);
-
-    function handleSettle(which: 'd1' | 'd2', value: number) {
-        results.current[which] = value;
-        if (results.current.d1 !== null && results.current.d2 !== null) {
-            const { d1, d2 } = results.current;
-            results.current = { d1: null, d2: null };
-            onRollResult?.(d1, d2);
-        }
-    }
-
+export default function DicePhysics({ rolling }: DicePhysicsProps) {
     return (
-        <group position={[0, 1, 5]}>
-            <DiceTray />
-            <SingleDie
-                startPos={[-1.5, 3, 0]}
-                color="#5c7cfa"
-                rollTrigger={rollTrigger}
-                mode={mode}
-                onSettled={(v) => handleSettle('d1', v)}
-            />
-            <SingleDie
-                startPos={[1.5, 3, 0]}
-                color="#f59e0b"
-                rollTrigger={rollTrigger}
-                mode={mode}
-                onSettled={(v) => handleSettle('d2', v)}
-            />
+        <group position={[0, 1.5, 5]}>
+            {/* Tray floor */}
+            <mesh position={[0, -0.2, 0]} receiveShadow>
+                <boxGeometry args={[6, 0.2, 4]} />
+                <meshStandardMaterial color="#0c0c22" roughness={0.9} transparent opacity={0.9} />
+            </mesh>
+            {/* Glowing border */}
+            <mesh position={[0, -0.08, 0]}>
+                <boxGeometry args={[5.7, 0.02, 3.6]} />
+                <meshStandardMaterial color="#5c7cfa" emissive="#5c7cfa" emissiveIntensity={1.8} transparent opacity={0.55} />
+            </mesh>
+            {/* Left wall */}
+            <mesh position={[-2.9, 0.5, 0]}>
+                <boxGeometry args={[0.15, 1.2, 4]} />
+                <meshStandardMaterial color="#14143a" transparent opacity={0.6} />
+            </mesh>
+            {/* Right wall */}
+            <mesh position={[2.9, 0.5, 0]}>
+                <boxGeometry args={[0.15, 1.2, 4]} />
+                <meshStandardMaterial color="#14143a" transparent opacity={0.6} />
+            </mesh>
+
+            {/* The two dice */}
+            <VisualDie position={[-1.3, 0.55, 0]} color="#5c7cfa" rolling={rolling} />
+            <VisualDie position={[1.3, 0.55, 0]} color="#f59e0b" rolling={rolling} />
         </group>
     );
 }

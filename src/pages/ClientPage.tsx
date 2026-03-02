@@ -1,8 +1,8 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSocket } from '../hooks/useSocket.js';
 import { useGameStore } from '../game/gameStore.js';
-import { buildMoveSlots } from '../game/gameRules.js';
+import { buildMoveSlots, rollDice } from '../game/gameRules.js';
 import { SFX, toggleMusic, unlockAudio } from '../hooks/useSound.js';
 import GameScene from '../components/3d/GameScene.js';
 import HUD from '../components/ui/HUD.js';
@@ -22,6 +22,11 @@ export default function ClientPage() {
     const [showSettings, setShowSettings] = useState(false);
     const [showTutorial, setShowTutorial] = useState(true);
     const [joined, setJoined] = useState(!!room);
+    // For visual dice display
+    const [rollingAnim, setRollingAnim] = useState(false);
+    const [d1Shown, setD1Shown] = useState<number | undefined>();
+    const [d2Shown, setD2Shown] = useState<number | undefined>();
+    const rollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const prevPhase = useRef<string>(phase);
 
     const code = roomCode ?? room?.code ?? '';
@@ -55,19 +60,26 @@ export default function ClientPage() {
     function handleRoll() {
         if (phase !== 'idle') return;
         unlockAudio();
+        SFX.roll();
+
+        // 1. Compute dice values immediately (reliable)
+        const roll = rollDice(settings.diceMode);
+
+        // 2. Start visual spinning animation
+        setRollingAnim(true);
         setRollTrigger((t) => t + 1);
         setPhase('rolling');
-    }
 
-    const handleDiceResult = useCallback(
-        (d1: number, d2: number) => {
-            const isDoubles = d1 === d2;
-            const roll = { d1, d2, isDoubles };
+        // 3. After 2 seconds show result, update game state
+        if (rollTimer.current) clearTimeout(rollTimer.current);
+        rollTimer.current = setTimeout(() => {
+            setD1Shown(roll.d1);
+            setD2Shown(roll.d2);
+            setRollingAnim(false);
             const slots = buildMoveSlots(roll);
             useGameStore.setState({ currentRoll: roll, moveSlots: slots, phase: 'selecting', moveHistory: [] });
-        },
-        []
-    );
+        }, 2000);
+    }
 
     function handleDiskClick(diskId: string) {
         if (selectedSlot === null) return;
@@ -95,9 +107,11 @@ export default function ClientPage() {
             <div className="absolute inset-0">
                 <GameScene
                     rollTrigger={rollTrigger}
-                    onRollResult={handleDiceResult}
                     onDiskClick={handleDiskClick}
                     selectableSlotIndex={selectedSlot}
+                    rolling={rollingAnim}
+                    d1Value={d1Shown}
+                    d2Value={d2Shown}
                 />
             </div>
 

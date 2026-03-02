@@ -4,20 +4,22 @@ import { Physics } from '@react-three/rapier';
 import { Suspense } from 'react';
 
 import SceneLighting from './SceneLighting.js';
-import BoardTrack, { SLOT_SPACING } from './BoardTrack.js';
+import BoardTrack from './BoardTrack.js';
 import DiskPiece from './DiskPiece.js';
 import DicePhysics from './DicePhysics.js';
 import { useGameStore } from '../../game/gameStore.js';
 import { blotLocations } from '../../game/gameRules.js';
 
 interface GameSceneProps {
-    onRollResult?: (d1: number, d2: number) => void;
     onDiskClick?: (diskId: string) => void;
     rollTrigger: number;
     selectableSlotIndex: number | null;
+    rolling: boolean;
+    d1Value?: number;
+    d2Value?: number;
 }
 
-function SceneInner({ onRollResult, onDiskClick, rollTrigger }: GameSceneProps) {
+function SceneInner({ onDiskClick, rollTrigger, rolling, d1Value, d2Value }: GameSceneProps) {
     const { disks, moveSlots, phase, settings } = useGameStore();
 
     // Group disks by location for stacking
@@ -30,10 +32,6 @@ function SceneInner({ onRollResult, onDiskClick, rollTrigger }: GameSceneProps) 
     );
 
     const blots = phase === 'gameover' ? blotLocations(disks) : [];
-
-    // Camera target: average disk position (OrbitControls pans the camera, not the board)
-    const avgLocation = disks.reduce((s, d) => s + d.location, 0) / disks.length;
-    const cameraTargetX = avgLocation * SLOT_SPACING;
 
     // Slot range for the board — determines which rings to render
     const locations = disks.map((d) => d.location);
@@ -76,17 +74,19 @@ function SceneInner({ onRollResult, onDiskClick, rollTrigger }: GameSceneProps) 
                         )),
                     )}
 
+                    {/* Dice – visual only */}
                     <DicePhysics
                         rollTrigger={rollTrigger}
-                        onRollResult={onRollResult}
                         mode={settings.diceMode}
+                        rolling={rolling}
+                        d1Value={d1Value}
+                        d2Value={d2Value}
                     />
                 </Physics>
             </Suspense>
 
-            {/* Camera pans to follow the average disk position */}
             <OrbitControls
-                target={[cameraTargetX, 0, 0]}
+                target={[0, 0, 0]}
                 minDistance={5}
                 maxDistance={20}
                 maxPolarAngle={Math.PI / 2.2}

@@ -27,6 +27,17 @@ npm run preview
 
 There is no test runner configured.
 
+## Known Issues
+
+**`src/components/3d/GameScene.tsx` has unresolved git merge conflicts** (lines 5–127). The file has `<<<<<<< HEAD` / `>>>>>>>` markers scattered throughout. The two branches differ on whether the board scrolls (`cameraX` prop on `BoardTrack`) or the camera pans to follow disks (OrbitControls `target`). The HEAD branch also passes `occupiedSlots/minSlot/maxSlot` to `BoardTrack`. The file currently renders but is inconsistent — resolve before modifying 3D rendering.
+
+## Environment Variables
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `VITE_SERVER_URL` | `http://localhost:3001` | Frontend socket connection target |
+| `PORT` | `3001` | Backend server port |
+
 ## Architecture
 
 ### Routing (3 routes)
@@ -46,13 +57,35 @@ Pure functions: `rollDice`, `buildMoveSlots`, `applyMove`, `checkBlot`, `createI
 ### 3D Rendering (`src/components/3d/`)
 React Three Fiber canvas wrapping Three.js. `@react-three/rapier` provides physics for dice rolling. `@react-spring/three` and GSAP handle animations.
 
+`BoardTrack.tsx` exports the `SLOT_SPACING` constant used to calculate `boardScrollX = avgLocation * SLOT_SPACING` for camera/board positioning.
+
+The `settings.quality` field only affects `gl.antialias` on the Canvas (`antialias: quality !== 'low'`). It has no other rendering effect.
+
 ### Real-time Multiplayer (`server/`)
 - `server/index.ts` — Express 5 + Socket.IO server on `process.env.PORT ?? 3001`
 - `server/roomManager.ts` — In-memory `Map` of rooms (no persistence; rooms lost on restart)
+- `server/types.ts` — `Player`, `Room`, `RoomStore` interfaces
 - Key Socket.IO events: `create-room`, `join-room`, `score-update`, `disconnect`, `request-leaderboard`
 
+`getSocket()` in `src/hooks/useSocket.ts` is a module-level singleton (not React-scoped), exported for use outside hooks. Rooms auto-delete when the last player disconnects.
+
+Score transmitted to server = turn count. When phase becomes `gameover`, status is set to `'blotted'` and emitted via `score-update`.
+
+### Game Phase State Machine
+```
+idle → (roll button) → rolling → (2 s timer) → selecting → (all slots used) → idle
+                                                                              ↓ (if checkBlot)
+                                                                          gameover
+```
+**Key:** Dice values are computed immediately on roll; the 2-second animation is purely visual and independent of computed state. `checkBlot()` runs only after **all** move slots are consumed in `selectDisk`, not incrementally after each move.
+
+### Move Slot Rules
+- Non-doubles → 2 slots `[d1, d2]`
+- Doubles → 4 slots `[d1, d1, d1, d1]`
+- Player must exhaust all slots; unused slots are forfeited when the player clicks "End Turn"
+
 ### Audio
-Entirely procedural via Web Audio API in `src/hooks/useSound.ts` — no audio asset files.
+Entirely procedural via Web Audio API in `src/hooks/useSound.ts` — no audio asset files. Implements Bach Minuet in G (BWV Anh. 114) as an infinite loop using oscillators scheduled with a 4-beat lookahead buffer. Call `unlockAudio()` on first user interaction to satisfy browser autoplay policy.
 
 ## Key Technology Choices
 

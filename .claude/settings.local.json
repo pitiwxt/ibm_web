@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc -l)",
+      "Bash(wc -l \"C:\\\\Users\\\\nanop\\\\Documents\\\\ibm_web\\\\src\\\\components\\\\3d\"/*.tsx)",
+      "Bash(wc -l \"C:\\\\Users\\\\nanop\\\\Documents\\\\ibm_web\\\\src\\\\components\\\\ui\"/*.tsx)"
+    ]
+  }
+}
