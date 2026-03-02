@@ -3,7 +3,8 @@ import { io, Socket } from 'socket.io-client';
 import { useGameStore } from '../game/gameStore.js';
 import type { LeaderboardEntry } from '../game/types.js';
 
-const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:3001';
+const SERVER_URL = import.meta.env.VITE_SERVER_URL;
+if (!SERVER_URL) throw new Error('VITE_SERVER_URL is not set');
 
 let socket: Socket | null = null;
 

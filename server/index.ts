@@ -65,5 +65,5 @@ io.on('connection', (socket: Socket) => {
 
 const PORT = process.env.PORT ?? 3001;
 httpServer.listen(PORT, () => {
-    console.log(`🎲 Backgammon Survival server running on http://localhost:${PORT}`);
+    console.log(`🎲 Backgammon Survival server running on port ${PORT}`);
 });
