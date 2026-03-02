@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: backgammon-survival-server
+    env: node
+    buildCommand: yarn && yarn build:server
+    startCommand: yarn start
+    envVars:
+      - key: NODE_ENV
+        value: production

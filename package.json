@@ -8,6 +8,9 @@
     "client": "vite",
     "server": "tsx server/index.ts",
     "build": "tsc -b && vite build",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "start": "node dist-server/index.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },

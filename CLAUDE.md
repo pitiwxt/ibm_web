@@ -10,26 +10,26 @@ A multiplayer educational backgammon-survival game. Teachers host a room (visibl
 
 ```bash
 # Install dependencies
-npm install
+yarn
 
 # Start both frontend (Vite, port 5173) and backend (Express, port 3001) concurrently
-npm run dev
+yarn dev
+
+# Run frontend or backend independently
+yarn client   # Vite dev server only
+yarn server   # tsx server only
 
 # Build for production (TypeScript check + Vite bundle → /dist)
-npm run build
+yarn build
 
 # Lint
-npm run lint
+yarn lint
 
 # Preview production build
-npm run preview
+yarn preview
 ```
 
 There is no test runner configured.
-
-## Known Issues
-
-**`src/components/3d/GameScene.tsx` has unresolved git merge conflicts** (lines 5–127). The file has `<<<<<<< HEAD` / `>>>>>>>` markers scattered throughout. The two branches differ on whether the board scrolls (`cameraX` prop on `BoardTrack`) or the camera pans to follow disks (OrbitControls `target`). The HEAD branch also passes `occupiedSlots/minSlot/maxSlot` to `BoardTrack`. The file currently renders but is inconsistent — resolve before modifying 3D rendering.
 
 ## Environment Variables
 
@@ -52,14 +52,18 @@ Zustand store at `src/game/gameStore.ts` with three combined slices:
 - **RoomSlice** — room code, nickname, isHost flag, leaderboard array
 
 ### Game Logic (`src/game/gameRules.ts`)
-Pure functions: `rollDice`, `buildMoveSlots`, `applyMove`, `checkBlot`, `createInitialDisks`. No side effects — called from the Zustand store actions.
+Pure functions: `rollDice`, `buildMoveSlots`, `applyMove`, `checkBlot`, `blotLocations`, `validateSelection`, `createInitialDisks`. No side effects — called from the Zustand store actions. `blotLocations()` returns an array of slot numbers with exactly 1 disk (used for highlighting in `gameover` phase).
 
 ### 3D Rendering (`src/components/3d/`)
 React Three Fiber canvas wrapping Three.js. `@react-three/rapier` provides physics for dice rolling. `@react-spring/three` and GSAP handle animations.
 
-`BoardTrack.tsx` exports the `SLOT_SPACING` constant used to calculate `boardScrollX = avgLocation * SLOT_SPACING` for camera/board positioning.
+- `GameScene.tsx` — top-level Canvas (camera at `[0, 8, 14]`, fov 55); groups disks by location for stacking, computes blot locations in `gameover` phase, passes `occupiedSlots/minSlot/maxSlot` to `BoardTrack`
+- `BoardTrack.tsx` — renders board platform and slot markers; exports `SLOT_SPACING = 2` (world units between slots); slot markers glow amber when occupied, blue when empty
+- `DiskPiece.tsx` — individual disk; stacked vertically per slot
+- `DicePhysics.tsx` — physics-driven visual dice (values computed independently in store)
+- `SceneLighting.tsx` — scene lighting setup
 
-The `settings.quality` field only affects `gl.antialias` on the Canvas (`antialias: quality !== 'low'`). It has no other rendering effect.
+The `settings.quality` field only affects `gl.antialias` on the Canvas (`antialias: quality !== 'low'`). It has no other rendering effect. Default settings: `diceMode: '1-2'`, `soundEnabled: true`, `musicEnabled: false`, `quality: 'medium'`.
 
 ### Real-time Multiplayer (`server/`)
 - `server/index.ts` — Express 5 + Socket.IO server on `process.env.PORT ?? 3001`
@@ -86,6 +90,41 @@ idle → (roll button) → rolling → (2 s timer) → selecting → (all slots 
 
 ### Audio
 Entirely procedural via Web Audio API in `src/hooks/useSound.ts` — no audio asset files. Implements Bach Minuet in G (BWV Anh. 114) as an infinite loop using oscillators scheduled with a 4-beat lookahead buffer. Call `unlockAudio()` on first user interaction to satisfy browser autoplay policy.
+
+## Deployment
+
+The app splits into two separately deployed services:
+- **Frontend** → Vercel (static SPA)
+- **Backend** → Render (persistent Node server for Socket.IO WebSockets)
+
+### Backend → Render
+
+1. Push this repo to GitHub.
+2. On [render.com](https://render.com), create a **New Web Service** → connect the repo.
+3. Render auto-detects `render.yaml`; confirm these settings:
+   - **Build command:** `npm install && npm run build:server`
+   - **Start command:** `npm run start`
+   - **Environment:** Node
+4. No manual env vars needed — Render injects `PORT` automatically.
+5. After deploy, copy the service URL (e.g. `https://backgammon-survival-server.onrender.com`).
+
+> **Note:** The free Render tier spins down after 15 min of inactivity. Use a paid plan or a cron ping service for classroom use.
+
+### Frontend → Vercel
+
+1. On [vercel.com](https://vercel.com), create a **New Project** → import the same repo.
+2. Vercel auto-detects `vercel.json`; no framework overrides needed.
+3. Add an **Environment Variable** in the Vercel dashboard:
+   - `VITE_SERVER_URL` = your Render service URL (e.g. `https://backgammon-survival-server.onrender.com`)
+4. Deploy. All routes (`/host`, `/play/:roomCode`) are rewritten to `index.html` by `vercel.json`.
+
+### Production build scripts
+
+```bash
+yarn build:client   # Vite only → dist/          (used by Vercel)
+yarn build:server   # tsc server → dist-server/  (used by Render)
+yarn start          # node dist-server/index.js  (Render start command)
+```
 
 ## Key Technology Choices
 
